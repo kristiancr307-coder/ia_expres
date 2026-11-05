@@ -7,14 +7,21 @@ import type { AskResult } from '../contracts/ask.js';
 import { ApiError } from '../errors/api-error.js';
 
 // 1. Contrato de un modelo del catálogo
+// Las tarifas pueden venir como texto o como número, y
+// "request" puede faltar (se interpreta como 0).
+
+const priceSchema = z.union([
+  z.string(),
+  z.number()
+]).transform((value) => String(value));
 
 const modelSchema = z.object({
   id: z.string(),
 
   pricing: z.object({
-    prompt: z.string(),
-    completion: z.string(),
-    request: z.string()
+    prompt: priceSchema,
+    completion: priceSchema,
+    request: priceSchema.optional().default('0')
   }),
 
   architecture: z.object({
@@ -66,20 +73,41 @@ function isZeroPrice(value: string): boolean {
   );
 }
 
-// 6. Comprobar modelo gratuito de texto
+// 6. Motivo por el que un modelo no califica
 
-export function isVerifiedFreeTextModel(
+export type FreeModelRejection =
+  | 'INVALID_SHAPE'
+  | 'ID_MISMATCH'
+  | 'NOT_FREE_SUFFIX'
+  | 'NONZERO_PRICE'
+  | 'NOT_TEXT';
+
+export type FreeModelCheck =
+  | { ok: true }
+  | { ok: false; reason: FreeModelRejection };
+
+// 7. Verificar un modelo del catálogo (misma regla para la API y el script)
+
+export function inspectFreeModel(
   raw: unknown,
   selectedId: string
-): boolean {
+): FreeModelCheck {
 
   const parsed = modelSchema.safeParse(raw);
 
   if (!parsed.success) {
-    return false;
+    return { ok: false, reason: 'INVALID_SHAPE' };
   }
 
   const model = parsed.data;
+
+  if (model.id !== selectedId) {
+    return { ok: false, reason: 'ID_MISMATCH' };
+  }
+
+  if (!selectedId.endsWith(':free')) {
+    return { ok: false, reason: 'NOT_FREE_SUFFIX' };
+  }
 
   const prices = [
     model.pricing.prompt,
@@ -87,20 +115,32 @@ export function isVerifiedFreeTextModel(
     model.pricing.request
   ];
 
-  return (
-    model.id === selectedId &&
+  if (!prices.every(isZeroPrice)) {
+    return { ok: false, reason: 'NONZERO_PRICE' };
+  }
 
-    selectedId.endsWith(':free') &&
-
-    prices.every(isZeroPrice) &&
-
+  const acceptsText =
     model.architecture.input_modalities.includes('text') &&
+    model.architecture.output_modalities.includes('text');
 
-    model.architecture.output_modalities.includes('text')
-  );
+  if (!acceptsText) {
+    return { ok: false, reason: 'NOT_TEXT' };
+  }
+
+  return { ok: true };
 }
 
-// 7. Función HTTP reutilizable
+// 8. Comprobar modelo gratuito de texto
+
+export function isVerifiedFreeTextModel(
+  raw: unknown,
+  selectedId: string
+): boolean {
+
+  return inspectFreeModel(raw, selectedId).ok;
+}
+
+// 9. Función HTTP reutilizable
 
 async function requestJson(
   url: string,
@@ -170,7 +210,7 @@ async function requestJson(
   }
 }
 
-// 8. Verificar el modelo antes de generar
+// 10. Verificar el modelo antes de generar
 
 export async function verifyFreeModel(
   config: AppConfig
@@ -247,7 +287,7 @@ export async function verifyFreeModel(
   return modelId;
 }
 
-// 9. Realizar la inferencia
+// 11. Realizar la inferencia
 
 export async function generateOpenRouterAnswer(
   question: string,

@@ -2,24 +2,30 @@
  * Lista solo modelos GRATUITOS y de TEXTO del catálogo de OpenRouter.
  *
  * Usa exactamente la misma regla que aplica la API antes de cada
- * inferencia (`isVerifiedFreeTextModel`), así lo que ves aquí es
- * lo que la API aceptará.
+ * inferencia (`inspectFreeModel`), así lo que ves aquí es lo que la
+ * API aceptará.
  *
  * Uso:
- *   npm run models:list
+ *   npm run models:list          # lista los modelos válidos
+ *   npm run models:list -- --debug   # además muestra ejemplos crudos
  *
- * No consume tokens: solo hace GET al catálogo de modelos.
+ * No consume tokens: solo hace un GET al catálogo de modelos.
  */
 
 import 'dotenv/config';
 
 import { z } from 'zod';
 
-import { isVerifiedFreeTextModel } from '../src/ai/openrouter.js';
+import {
+  inspectFreeModel,
+  type FreeModelRejection
+} from '../src/ai/openrouter.js';
 
 const CATALOG_URL =
   process.env.OPENROUTER_MODELS_URL ??
   'https://openrouter.ai/api/v1/models';
+
+const DEBUG = process.argv.includes('--debug');
 
 const TIMEOUT_MS = (() => {
 
@@ -39,6 +45,14 @@ const catalogSchema = z.object({
 const idSchema = z.object({
   id: z.string().min(1)
 });
+
+const REASON_LABEL: Record<FreeModelRejection, string> = {
+  INVALID_SHAPE: 'formato de pricing/architecture inesperado',
+  ID_MISMATCH: 'el id no coincide',
+  NOT_FREE_SUFFIX: 'no termina en ":free"',
+  NONZERO_PRICE: 'alguna tarifa no es 0',
+  NOT_TEXT: 'no acepta texto de entrada y salida'
+};
 
 async function fetchCatalog(): Promise<unknown[]> {
 
@@ -97,6 +111,15 @@ async function fetchCatalog(): Promise<unknown[]> {
   return parsed.data.data;
 }
 
+function shortJson(value: unknown): string {
+
+  const text = JSON.stringify(value) ?? String(value);
+
+  return text.length > 400
+    ? `${text.slice(0, 400)}…`
+    : text;
+}
+
 async function main(): Promise<void> {
 
   console.log(`Consultando catálogo: ${CATALOG_URL}`);
@@ -104,6 +127,12 @@ async function main(): Promise<void> {
   const models = await fetchCatalog();
 
   const free: string[] = [];
+
+  const rejected: Array<{
+    id: string;
+    reason: FreeModelRejection;
+    raw: unknown;
+  }> = [];
 
   for (const item of models) {
 
@@ -114,9 +143,15 @@ async function main(): Promise<void> {
     }
 
     const id = parsedId.data.id;
+    const check = inspectFreeModel(item, id);
 
-    if (isVerifiedFreeTextModel(item, id)) {
+    if (check.ok) {
+
       free.push(id);
+
+    } else {
+
+      rejected.push({ id, reason: check.reason, raw: item });
     }
   }
 
@@ -125,9 +160,69 @@ async function main(): Promise<void> {
   console.log('');
   console.log(`Modelos del catálogo: ${models.length}`);
   console.log(
+    `Ids que terminan en ":free": ${
+      models.filter((item) => {
+        const parsed = idSchema.safeParse(item);
+        return parsed.success && parsed.data.id.endsWith(':free');
+      }).length
+    }`
+  );
+  console.log(
     `Gratuitos verificados (texto, precio 0): ${free.length}`
   );
   console.log('');
+
+  // Resumen de descartes (solo los motivos relevantes)
+
+  const byReason = new Map<FreeModelRejection, number>();
+
+  for (const item of rejected) {
+    byReason.set(item.reason, (byReason.get(item.reason) ?? 0) + 1);
+  }
+
+  console.log('Descartados por motivo:');
+
+  for (const [reason, count] of byReason) {
+    console.log(`  ${REASON_LABEL[reason]}: ${count}`);
+  }
+
+  console.log('');
+
+  // Candidatos ":free" rechazados: lo más útil para diagnosticar
+
+  const freeRejected = rejected.filter(
+    (item) => item.id.endsWith(':free')
+  );
+
+  if (freeRejected.length > 0) {
+
+    console.log(
+      `Candidatos ":free" rechazados (${freeRejected.length}):`
+    );
+
+    for (const item of freeRejected.slice(0, 5)) {
+      console.log(
+        `  ${item.id} -> ${REASON_LABEL[item.reason]}`
+      );
+    }
+
+    console.log('');
+
+    if (DEBUG) {
+
+      console.log('Ejemplos crudos (--debug):');
+
+      for (const item of freeRejected.slice(0, 3)) {
+        console.log(`  ${shortJson(item.raw)}`);
+      }
+
+      console.log('');
+      console.log(
+        'Copia este bloque y compártelo: describe el formato real del catálogo.'
+      );
+      console.log('');
+    }
+  }
 
   if (free.length === 0) {
 
@@ -135,10 +230,24 @@ async function main(): Promise<void> {
       'No hay modelos gratuitos verificables en este momento.'
     );
 
-    console.log(
-      'Usa AI_EXECUTION_MODE=mock mientras tanto.'
-    );
+    if (freeRejected.length > 0) {
 
+      console.log(
+        'Hay ids ":free" que no pasaron la verificación: revisa el detalle de arriba.'
+      );
+
+      console.log(
+        'Diagnóstico del formato real: npm run models:list -- --debug'
+      );
+
+    } else {
+
+      console.log(
+        'El catálogo no contiene ids terminados en ":free" ahora mismo.'
+      );
+    }
+
+    console.log('Usa AI_EXECUTION_MODE=mock mientras tanto.');
     return;
   }
 
@@ -159,16 +268,16 @@ async function main(): Promise<void> {
       'Aviso: OPENROUTER_MODEL está vacío en tu .env.'
     );
 
-  } else if (current.endsWith(':free') && !free.includes(current)) {
-
-    console.log(
-      `Aviso: "${current}" no aparece como gratuito verificado. No lo uses.`
-    );
-
   } else if (!current.endsWith(':free')) {
 
     console.log(
       `Aviso: "${current}" no termina en ":free"; la API lo rechazará con FREE_MODEL_REQUIRED.`
+    );
+
+  } else if (!free.includes(current)) {
+
+    console.log(
+      `Aviso: "${current}" no aparece como gratuito verificado. No lo uses.`
     );
   }
 }
