@@ -48,7 +48,14 @@ const completionSchema = z.object({
   }).optional()
 });
 
-// 4. Comprobar si una tarifa es cero
+// 4. Base del proveedor sin barra final
+
+function baseUrl(config: AppConfig): string {
+
+  return config.OPENROUTER_BASE_URL.replace(/\/+$/, '');
+}
+
+// 5. Comprobar si una tarifa es cero
 
 function isZeroPrice(value: string): boolean {
 
@@ -59,7 +66,7 @@ function isZeroPrice(value: string): boolean {
   );
 }
 
-// 5. Comprobar modelo gratuito de texto
+// 6. Comprobar modelo gratuito de texto
 
 export function isVerifiedFreeTextModel(
   raw: unknown,
@@ -93,7 +100,7 @@ export function isVerifiedFreeTextModel(
   );
 }
 
-// 6. Función HTTP reutilizable
+// 7. Función HTTP reutilizable
 
 async function requestJson(
   url: string,
@@ -163,7 +170,7 @@ async function requestJson(
   }
 }
 
-// 7. Verificar el modelo antes de generar
+// 8. Verificar el modelo antes de generar
 
 export async function verifyFreeModel(
   config: AppConfig
@@ -181,12 +188,12 @@ export async function verifyFreeModel(
     throw new ApiError(
       503,
       'FREE_MODEL_REQUIRED',
-      'Debes seleccionar un modelo gratuito explícito.'
+      'Debes seleccionar un modelo gratuito explícito terminado en ":free". Consulta: npm run models:list'
     );
   }
 
   const rawCatalog = await requestJson(
-    'https://openrouter.ai/api/v1/models',
+    `${baseUrl(config)}/models`,
     {
       method: 'GET',
       headers: {
@@ -233,14 +240,14 @@ export async function verifyFreeModel(
     throw new ApiError(
       503,
       'FREE_MODEL_UNAVAILABLE',
-      'No se confirmó un modelo gratuito compatible con texto.'
+      'No se confirmó un modelo gratuito compatible con texto. Consulta: npm run models:list'
     );
   }
 
   return modelId;
 }
 
-// 8. Realizar la inferencia
+// 9. Realizar la inferencia
 
 export async function generateOpenRouterAnswer(
   question: string,
@@ -256,7 +263,7 @@ export async function generateOpenRouterAnswer(
   // Construimos la solicitud HTTP
 
   const rawResponse = await requestJson(
-    'https://openrouter.ai/api/v1/chat/completions',
+    `${baseUrl(config)}/chat/completions`,
     {
       method: 'POST',
 

@@ -109,6 +109,14 @@ export function createApp(
     swaggerUi.setup(openApiDocument as JsonObject)
   );
 
+  // Atajo: la raíz lleva a la documentación
+
+  app.get('/', (_req, res) => {
+
+    res.redirect('/docs/');
+
+  });
+
   // Manejar rutas que no existen
 
   app.use((_req, _res, next) => {

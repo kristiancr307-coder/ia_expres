@@ -37,23 +37,22 @@ En `.env`: `AI_EXECUTION_MODE=mock`.
 
 ```powershell
 Invoke-RestMethod http://localhost:3000/health
-Invoke-RestMethod http://localhost:3000/api/v1/models
-Invoke-RestMethod -Uri http://localhost:3000/api/v1/chat -Method Post -ContentType 'application/json' -Body '{"question":"Explica un LLM"}'
+Invoke-RestMethod -Uri http://localhost:3000/api/v1/ask -Method Post -ContentType 'application/json' -Body '{"question":"Explica un LLM"}'
 ```
 
-Resultado esperado: `mode: mock`, `metricsSource: mock`, modelo `mock/educational`, uso de tokens `null`. Son datos simulados, nunca benchmarks.
+Resultado esperado: `mode: "mock"`, `model: "mock/educational-v1"`, `usage: null`. Son datos simulados, nunca benchmarks. La interfaz interactiva esta en `http://localhost:3000/docs/`.
 
 ## 3. OpenRouter remoto (solo modelos gratuitos)
 
 1. Crear clave en https://openrouter.ai/settings/keys y colocarla SOLO en `.env`.
 2. Revisar precio y límites en https://openrouter.ai/pricing y el router gratuito en https://openrouter.ai/openrouter/free.
-3. Cambiar `.env`: `AI_EXECUTION_MODE=openrouter`, `OPENROUTER_MODEL=openrouter/free`.
-4. Reiniciar servidor con `npm run dev`.
-5. Consultar modelos: `npm run models:list` (consulta el catálogo vivo y muestra solo modelos con precios prompt/completion/request iguales a cero y salida text).
+3. Cambiar `.env`: `AI_EXECUTION_MODE=openrouter` y poner la clave en `OPENROUTER_API_KEY`.
+4. Consultar modelos gratuitos vigentes: `npm run models:list` (consulta el catálogo vivo y muestra solo modelos con precios prompt/completion/request iguales a cero y salida text). Copiar uno en `OPENROUTER_MODEL`; **el id debe terminar en `:free`**. Sin un id valido la API no arranca (`CONFIG_ERROR`).
+5. Reiniciar servidor con `npm run dev` y probar en `/docs/` o con `POST /api/v1/ask`. Esperado: `mode: "openrouter"` y `usage` con conteo de tokens.
 6. Prueba SDK oficial: `npm run sdk:probe` (solicitud real; respeta límites de cuota).
 7. Probar `/api/v1/chat` con PowerShell como arriba.
 
-El router `openrouter/free` selecciona un modelo gratuito admitido, pero no estabiliza cuál. Para pruebas comparativas, elegir un ID concreto vigente del catálogo y ponerlo en `OPENROUTER_MODEL`; la API verificará tarifas antes de cada petición. Si deja de ser gratuito, responde `FREE_ONLY_VIOLATION` en vez de pasar a pago.
+No usar `openrouter/free`: ese id no termina en `:free`, no existe en el catálogo de modelos y la API lo rechaza. Hay que elegir un ID concreto, gratuito y vigente (`npm run models:list`). La API verifica las tres tarifas antes de cada petición; si el modelo deja de ser gratuito responde `FREE_MODEL_UNAVAILABLE` en vez de pasar a pago.
 
 ## 4. Ollama local (opcional)
 
@@ -106,9 +105,11 @@ Crear commits adicionales por API, validación, conexión OpenRouter y pruebas. 
 - `node` no encontrado: reinstalar Node LTS y abrir una terminal nueva.
 - Dependencias faltantes: ejecutar los dos `npm install` anteriores.
 - `npm ci` falla: todavía no se generó/commitió `package-lock.json`.
-- `KEY_MISSING`: falta `OPENROUTER_API_KEY`.
+- `CONFIG_ERROR`: falta `OPENROUTER_API_KEY`/`OPENROUTER_MODEL` o el modelo no termina en `:free`.
+- `PORT_ERROR`: el puerto ya está en uso.
 - `UPSTREAM_RATE_LIMIT` 429: esperar o pasar explícitamente a mock/local; no omitir política gratuita.
-- `FREE_ONLY_VIOLATION`: modelo cambió precio, es desconocido o remoto pide pago.
+- `FREE_MODEL_REQUIRED`: `OPENROUTER_MODEL` no termina en `:free`.
+- `FREE_MODEL_UNAVAILABLE`: el modelo no está en el catálogo, cambió de precio o no acepta texto.
 - `LOCAL_UNAVAILABLE`: comprobar `ollama list`, servidor y nombre de modelo.
 - `INVALID_JSON` 400: cuerpo JSON mal formado; `VALIDATION_ERROR` 400: `question` no cumple esquema.
 - Puertos ocupados: cambiar `PORT` en `.env`.

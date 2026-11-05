@@ -7,6 +7,10 @@ const envSchema = z.object({
     .max(65535)
     .default(3000),
 
+  HOST: z.string()
+    .min(1)
+    .default('127.0.0.1'),
+
   AI_EXECUTION_MODE: z.enum([
     'mock',
     'openrouter'
@@ -20,7 +24,11 @@ const envSchema = z.object({
 
   OPENROUTER_API_KEY: z.string().optional(),
 
-  OPENROUTER_MODEL: z.string().optional()
+  OPENROUTER_MODEL: z.string().optional(),
+
+  OPENROUTER_BASE_URL: z.string()
+    .min(1)
+    .default('https://openrouter.ai/api/v1')
 });
 
 export type AppConfig = z.infer<typeof envSchema>;
@@ -39,6 +47,17 @@ export function loadConfig(
     ) {
       throw new Error(
         'Debes configurar OPENROUTER_API_KEY y OPENROUTER_MODEL.'
+      );
+    }
+
+    // El modelo debe ser gratuito explícito: sufijo ":free".
+    // Esto evita que un id facturable llegue a la inferencia.
+
+    if (!config.OPENROUTER_MODEL.endsWith(':free')) {
+
+      throw new Error(
+        `OPENROUTER_MODEL="${config.OPENROUTER_MODEL}" no termina en ":free". ` +
+          'Ejecuta "npm run models:list" y copia un id gratuito vigente.'
       );
     }
   }
